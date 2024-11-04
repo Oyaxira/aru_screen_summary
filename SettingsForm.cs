@@ -240,15 +240,19 @@ namespace AruScreenSummary
 
         private void InitializeHistoryTab(TabPage tab)
         {
+            const int PAGE_SIZE = 20;
+            int currentPage = 0;
+
             // 创建一个垂直布局的面板
             var mainPanel = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                RowCount = 2,
+                RowCount = 3,  // 增加一行用于分页控件
                 ColumnCount = 1,
                 Padding = new Padding(5),
             };
             mainPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F)); // ListView占用所有剩余空间
+            mainPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F)); // 分页控件
             mainPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F)); // 状态栏固定高度
 
             var listView = new ListView
@@ -260,25 +264,114 @@ namespace AruScreenSummary
                 MultiSelect = false
             };
 
-            // 添加列
+            // 添加列（移除宽度列）
             listView.Columns.Add("时间", 150);
-            listView.Columns.Add("内容", 400);
-            listView.Columns.Add("宽度", 60);
+            listView.Columns.Add("内容", 460);  // 增加内容列宽度
             listView.Columns.Add("Prompt", 70);
             listView.Columns.Add("Completion", 70);
             listView.Columns.Add("Total", 70);
 
-            // 添加记录
-            foreach (var record in TranslationHistory.Records)
+            // 创建分页面板
+            var pagePanel = new TableLayoutPanel
             {
-                var item = new ListViewItem(record.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"));
-                item.SubItems.Add(record.Content);
-                item.SubItems.Add(record.Width.ToString());
-                item.SubItems.Add(record.PromptTokens.ToString());
-                item.SubItems.Add(record.CompletionTokens.ToString());
-                item.SubItems.Add(record.TotalTokens.ToString());
-                listView.Items.Add(item);
+                Dock = DockStyle.Fill,
+                ColumnCount = 4,
+                RowCount = 1,
+                Height = 35,
+                BackColor = Color.FromArgb(240, 240, 240)
+            };
+
+            var prevButton = new Button
+            {
+                Text = "上一页",
+                Enabled = false,
+                Height = 30,
+                Width = 80
+            };
+
+            var pageLabel = new Label
+            {
+                TextAlign = ContentAlignment.MiddleCenter,
+                AutoSize = false,
+                Height = 30
+            };
+
+            var nextButton = new Button
+            {
+                Text = "下一页",
+                Height = 30,
+                Width = 80
+            };
+
+            var pageSizeLabel = new Label
+            {
+                Text = $"每页 {PAGE_SIZE} 条",
+                TextAlign = ContentAlignment.MiddleRight,
+                AutoSize = false,
+                Height = 30
+            };
+
+            // 添加分页控件
+            pagePanel.Controls.Add(prevButton, 0, 0);
+            pagePanel.Controls.Add(pageLabel, 1, 0);
+            pagePanel.Controls.Add(nextButton, 2, 0);
+            pagePanel.Controls.Add(pageSizeLabel, 3, 0);
+
+            // 设置分页面板列宽
+            pagePanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            pagePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            pagePanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            pagePanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            // 更新列表视图的函数
+            void UpdateListView()
+            {
+                listView.Items.Clear();
+                var pageRecords = TranslationHistory.Records
+                    .Skip(currentPage * PAGE_SIZE)
+                    .Take(PAGE_SIZE);
+
+                foreach (var record in pageRecords)
+                {
+                    var item = new ListViewItem(record.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"));
+                    item.SubItems.Add(record.Content);
+                    item.SubItems.Add(record.PromptTokens.ToString());
+                    item.SubItems.Add(record.CompletionTokens.ToString());
+                    item.SubItems.Add(record.TotalTokens.ToString());
+                    listView.Items.Add(item);
+                }
+
+                // 更新页码显示
+                int totalPages = (int)Math.Ceiling(TranslationHistory.Records.Count / (double)PAGE_SIZE);
+                pageLabel.Text = $"第 {currentPage + 1} 页 / 共 {totalPages} 页";
+
+                // 更新按钮状态
+                prevButton.Enabled = currentPage > 0;
+                nextButton.Enabled = (currentPage + 1) < totalPages;
             }
+
+            // 绑定分页事件
+            prevButton.Click += (s, e) =>
+            {
+                if (currentPage > 0)
+                {
+                    currentPage--;
+                    UpdateListView();
+                }
+            };
+
+            nextButton.Click += (s, e) =>
+            {
+                int totalPages = (int)Math.Ceiling(TranslationHistory.Records.Count / (double)PAGE_SIZE);
+                if (currentPage + 1 < totalPages)
+                {
+                    currentPage++;
+                    UpdateListView();
+                }
+            };
+
+            // 初始化显示第一页
+            UpdateListView();
 
             // 计算总token使用量
             int totalPromptTokens = TranslationHistory.Records.Sum(r => r.PromptTokens);
@@ -330,20 +423,24 @@ namespace AruScreenSummary
             statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
             statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
 
-            // 恢复双击事件处理
+            // 恢复双击事件处理（注意：现在使用存储的宽度值）
             listView.DoubleClick += (s, e) =>
             {
                 if (listView.SelectedItems.Count > 0)
                 {
-                    var content = listView.SelectedItems[0].SubItems[1].Text;
-                    var width = int.Parse(listView.SelectedItems[0].SubItems[2].Text);
-                    ToastForm.ShowMessage(content, width);
+                    var selectedIndex = currentPage * PAGE_SIZE + listView.SelectedItems[0].Index;
+                    if (selectedIndex < TranslationHistory.Records.Count)
+                    {
+                        var record = TranslationHistory.Records[selectedIndex];
+                        ToastForm.ShowMessage(record.Content, record.Width);
+                    }
                 }
             };
 
             // 将控件添加到主面板
             mainPanel.Controls.Add(listView, 0, 0);
-            mainPanel.Controls.Add(statusPanel, 0, 1);
+            mainPanel.Controls.Add(pagePanel, 0, 1);
+            mainPanel.Controls.Add(statusPanel, 0, 2);
 
             // 将主面板添加到标签页
             tab.Controls.Add(mainPanel);
