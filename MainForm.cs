@@ -565,6 +565,28 @@ namespace AruScreenSummary
                 // 添加双击事件
                 notifyIcon.DoubleClick += (s, e) => ShowSettings();
 
+                // 显示气泡提示
+                string hotkeyText = string.Join("+", _currentHotkey.Select(k =>
+                {
+                    switch (k)
+                    {
+                        case Keys.ControlKey:
+                            return "Ctrl";
+                        case Keys.Menu:
+                            return "Alt";
+                        case Keys.ShiftKey:
+                            return "Shift";
+                        default:
+                            return k.ToString();
+                    }
+                }));
+
+                notifyIcon.ShowBalloonTip(
+                    3000,  // 显示时间（毫秒）
+                    "阿露助手",  // 标题
+                    $"阿露助手已经就绪，解析快捷键：{hotkeyText}",  // 内容
+                    ToolTipIcon.Info  // 图标类型
+                );
             }
             catch (Exception ex)
             {
