@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+# 添加权限配置
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -26,7 +30,7 @@ jobs:
 
     - name: Get current date
       id: date
-      run: echo "::set-output name=date::$(date +'%Y%m%d')"
+      run: echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
       shell: bash
 
     - name: Zip Release Files
@@ -34,7 +38,6 @@ jobs:
         Compress-Archive -Path "bin\Release\net7.0-windows\win-x64\publish\*" -DestinationPath "AruScreenSummary_${{ steps.date.outputs.date }}_${{ github.ref_name }}.zip"
 
     - name: Create Release
-      id: create_release
       uses: softprops/action-gh-release@v1
       with:
         files: |
@@ -49,8 +52,6 @@ jobs:
           - Windows 10/11
           - [.NET 7.0 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/7.0)
 
-          ## 更新内容
-          - 请在此处添加更新说明
         draft: false
         prerelease: false
       env:
