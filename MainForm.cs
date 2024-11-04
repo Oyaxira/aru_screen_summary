@@ -1,0 +1,456 @@
+using System;
+using System.Runtime.InteropServices;
+using System.Drawing.Imaging;
+using System.Windows.Forms;
+using System.Drawing;
+using System.Net.Http.Json;
+using System.Diagnostics;
+using System.Text.Json;
+using System.Net.Http;
+using System.Text;
+
+namespace ScreenshotGPT
+{
+    public partial class MainForm : Form
+    {
+        private GlobalKeyboardHook _globalHook;
+        private bool _isCapturing = false;
+        private Point _startPoint;
+        private Form _overlay;
+        private AppSettings _settings;
+        private NotifyIcon notifyIcon;
+        private Keys[] _currentHotkey = new Keys[] { Keys.ControlKey, Keys.Menu, Keys.P }; // 修改默认快捷键，使用通用的Control和Alt键
+        private bool _disposed = false;
+
+        public MainForm()
+        {
+            try
+            {
+                Trace.WriteLine("MainForm 构造函数开始");
+                InitializeComponent();
+
+                // 加载设置和历史记录
+                _settings = AppSettings.Load();
+                TranslationHistory.Load();
+                Trace.WriteLine($"加载的设置 - API Key: {_settings.ApiKey?.Length > 0}, Endpoint: {_settings.Endpoint}");
+
+                // 使用保存的快捷键或默认快捷键
+                _currentHotkey = _settings.HotKeys?.Length > 0 ? _settings.HotKeys : new Keys[] { Keys.ControlKey, Keys.Menu, Keys.P };
+                Trace.WriteLine($"使用快捷键: {string.Join(" + ", _currentHotkey)}");
+
+                // 先初始化托盘图标，确保在隐藏窗口前托盘图标已经显示
+                InitializeNotifyIcon();
+                InitializeHotKey();
+
+                Trace.WriteLine("初始化完成");
+
+                // 确保托盘图标可见后再隐藏主窗体
+                this.ShowInTaskbar = false;
+                this.WindowState = FormWindowState.Minimized;
+                this.Hide();
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine($"MainForm 初始化错误: {ex}");
+                MessageBox.Show($"初始化错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void InitializeHotKey()
+        {
+            try
+            {
+                if (_globalHook != null)
+                {
+                    Trace.WriteLine("正在释放旧的钩子");
+                    _globalHook.Dispose();
+                    _globalHook = null;
+                }
+
+                Trace.WriteLine("开始初始化全局钩子");
+                _globalHook = new GlobalKeyboardHook();
+                _globalHook.KeyCombination = _currentHotkey;
+                _globalHook.KeyPressed += () =>
+                {
+                    Trace.WriteLine("快捷键事件被触发");
+                    if (!_isCapturing)
+                    {
+                        Trace.WriteLine("准备开始截图");
+                        if (InvokeRequired)
+                        {
+                            Trace.WriteLine("在UI线程上执行截图");
+                            Invoke(new Action(StartCapture));
+                        }
+                        else
+                        {
+                            StartCapture();
+                        }
+                    }
+                    else
+                    {
+                        Trace.WriteLine("已经在截图中，忽略本次触发");
+                    }
+                };
+                Trace.WriteLine($"已设置快捷键: {string.Join(" + ", _currentHotkey)}");
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine($"初始化快捷键时出错: {ex.Message}\n{ex.StackTrace}");
+                MessageBox.Show($"初始化快捷键时出错: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        public void StartCapture()
+        {
+            Trace.WriteLine("开始截图");
+            if (_isCapturing)
+            {
+                Trace.WriteLine("已经在截图中，忽略本次触发");
+                return;
+            }
+            _isCapturing = true;
+            Trace.WriteLine("创建遮罩窗口");
+
+            // 确保在UI线程上执行
+            if (InvokeRequired)
+            {
+                Invoke(new Action(() => CreateOverlay()));
+            }
+            else
+            {
+                CreateOverlay();
+            }
+        }
+
+        private void CreateOverlay()
+        {
+            Trace.WriteLine("开始创建遮罩窗口");
+            try
+            {
+                _overlay = new Form
+                {
+                    WindowState = FormWindowState.Maximized,
+                    FormBorderStyle = FormBorderStyle.None,
+                    Opacity = 0.3,
+                    BackColor = Color.Black,
+                    ShowInTaskbar = false,
+                    TopMost = true,
+                    StartPosition = FormStartPosition.Manual,
+                    Location = new Point(0, 0),
+                    Size = Screen.PrimaryScreen.Bounds.Size
+                };
+
+                _overlay.MouseDown += Overlay_MouseDown;
+                _overlay.MouseMove += Overlay_MouseMove;
+                _overlay.MouseUp += Overlay_MouseUp;
+                _overlay.Paint += Overlay_Paint;
+                _overlay.KeyDown += (s, e) =>
+                {
+                    if (e.KeyCode == Keys.Escape)
+                    {
+                        _isCapturing = false;
+                        _overlay.Close();
+                    }
+                };
+
+                Trace.WriteLine("显示遮罩窗口");
+                _overlay.Show();
+                _overlay.Activate(); // 确保窗口在最前
+                Trace.WriteLine($"遮罩窗口已显示 - 位置: {_overlay.Location}, 大小: {_overlay.Size}");
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine($"创建遮罩窗口时出错: {ex.Message}\n{ex.StackTrace}");
+                _isCapturing = false;
+            }
+        }
+
+        private Rectangle _selectionRect;
+        private bool _isDrawing;
+
+        private void Overlay_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                _startPoint = e.Location;
+                _isDrawing = true;
+            }
+        }
+
+        private void Overlay_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (_isDrawing)
+            {
+                _selectionRect = new Rectangle(
+                    Math.Min(_startPoint.X, e.X),
+                    Math.Min(_startPoint.Y, e.Y),
+                    Math.Abs(e.X - _startPoint.X),
+                    Math.Abs(e.Y - _startPoint.Y)
+                );
+                _overlay.Invalidate();
+            }
+        }
+
+        private void Overlay_Paint(object sender, PaintEventArgs e)
+        {
+            if (_isDrawing)
+            {
+                using (Pen pen = new Pen(Color.Red, 2))
+                {
+                    e.Graphics.DrawRectangle(pen, _selectionRect);
+                }
+            }
+        }
+
+        private async void Overlay_MouseUp(object sender, MouseEventArgs e)
+        {
+            if (_selectionRect.Width > 0 && _selectionRect.Height > 0)
+            {
+                _overlay.Hide();
+                await Task.Delay(100); // 等待overlay完全隐藏
+
+                try
+                {
+                    // 立即显示加载提示
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        ToastForm.ShowLoading(_selectionRect.Width);
+                    });
+
+                    using (Bitmap bitmap = new Bitmap(_selectionRect.Width, _selectionRect.Height))
+                    {
+                        using (Graphics g = Graphics.FromImage(bitmap))
+                        {
+                            g.CopyFromScreen(
+                                _selectionRect.Left,
+                                _selectionRect.Top,
+                                0,
+                                0,
+                                new Size(_selectionRect.Width, _selectionRect.Height)
+                            );
+                        }
+                        await SendToGPT(bitmap);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        ToastForm.ShowMessage($"截图错误: {ex.Message}");
+                    });
+                }
+            }
+
+            _isCapturing = false;
+            _isDrawing = false;
+            _overlay.Close();
+            _overlay.Dispose();
+        }
+
+        private async Task SendToGPT(Bitmap image)
+        {
+            try
+            {
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    image.Save(ms, ImageFormat.Png);
+                    string base64Image = Convert.ToBase64String(ms.ToArray());
+
+                    using (HttpClient client = new HttpClient())
+                    {
+                        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {_settings.ApiKey}");
+
+                        var requestData = new
+                        {
+                            model = _settings.Model,
+                            messages = new[]
+                            {
+                                new
+                                {
+                                    role = "user",
+                                    content = new object[]
+                                    {
+                                        new { type = "text", text = "请描述并解析这张图片的内容" },
+                                        new
+                                        {
+                                            type = "image_url",
+                                            image_url = new
+                                            {
+                                                url = $"data:image/png;base64,{base64Image}"
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            max_tokens = _settings.MaxTokens
+                        };
+
+                        var jsonContent = JsonSerializer.Serialize(requestData);
+                        var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                        var response = await client.PostAsync(_settings.Endpoint, content);
+
+                        if (response.IsSuccessStatusCode)
+                        {
+                            var result = await response.Content.ReadFromJsonAsync<GPTResponse>();
+                            var responseContent = result.choices[0].message.content;
+
+                            // 添加到历史记录时包含宽度
+                            TranslationHistory.AddRecord(responseContent, _selectionRect.Width);
+
+                            this.Invoke((MethodInvoker)delegate
+                            {
+                                ToastForm.ShowMessage(responseContent, _selectionRect.Width);
+                            });
+                        }
+                        else
+                        {
+                            var errorContent = await response.Content.ReadAsStringAsync();
+                            this.Invoke((MethodInvoker)delegate
+                            {
+                                ToastForm.ShowMessage($"API 请求失败: {response.StatusCode}\n{errorContent}");
+                            });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                this.Invoke((MethodInvoker)delegate
+                {
+                    ToastForm.ShowMessage(ex.Message, 300);  // 错误消息使用默认宽度
+                });
+            }
+        }
+
+        private void InitializeNotifyIcon()
+        {
+            try
+            {
+                notifyIcon = new NotifyIcon
+                {
+                    Visible = true,
+                    Text = "Aru Screen Summary"
+                };
+
+                // 尝试加载自定义图标
+                try
+                {
+                    using (var bitmap = new Bitmap("bot.png"))
+                    {
+                        IntPtr hIcon = bitmap.GetHicon();
+                        notifyIcon.Icon = Icon.FromHandle(hIcon);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Trace.WriteLine($"加载自定义图标失败: {ex.Message}");
+                    notifyIcon.Icon = SystemIcons.Application;  // 使用默认图标
+                }
+
+                // 创建右键菜单
+                var contextMenu = new ContextMenuStrip();
+
+                // 添加设置选项
+                contextMenu.Items.Add("设置", null, (s, e) => ShowSettings());
+                contextMenu.Items.Add("退出", null, (s, e) =>
+                {
+                    notifyIcon.Visible = false;
+                    notifyIcon.Dispose();
+                    Application.Exit();
+                });
+
+                notifyIcon.ContextMenuStrip = contextMenu;
+
+                // 添加双击事件
+                notifyIcon.DoubleClick += (s, e) => ShowSettings();
+
+                Trace.WriteLine("托盘图标初始化完成");
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine($"初始化托盘图标失败: {ex.Message}");
+                throw; // 重新抛出异常，因为没有托盘图标程序就无法正常使用
+            }
+        }
+
+        private void ShowSettings()
+        {
+            var settingsForm = new SettingsForm(_settings, _currentHotkey, _globalHook);
+
+            // 先隐藏窗口
+            settingsForm.Visible = false;
+
+            // 设置位置和激活
+            settingsForm.StartPosition = FormStartPosition.CenterScreen;
+            settingsForm.Show();
+            settingsForm.BringToFront();
+            settingsForm.Activate();
+            settingsForm.Focus();
+
+            // 隐藏后再显示为模态对话框
+            settingsForm.Hide();
+            settingsForm.ShowDialog();
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;  // 取消关闭操作
+                this.Hide();  // 隐藏窗口
+                return;
+            }
+
+            // 确保清理资源
+            if (!_disposed)
+            {
+                if (notifyIcon != null)
+                {
+                    notifyIcon.Visible = false;
+                    notifyIcon.Dispose();
+                }
+
+                if (_globalHook != null)
+                {
+                    _globalHook.Dispose();
+                }
+
+                _disposed = true;
+            }
+
+            base.OnFormClosing(e);
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+        public void UpdateHotKey(Keys[] newHotKey)
+        {
+            try
+            {
+                _currentHotkey = newHotKey;
+                Trace.WriteLine($"更新快捷键: {string.Join(" + ", newHotKey)}");
+
+                if (_globalHook != null)
+                {
+                    // 直接更新组合键，内部会重新注册钩子
+                    _globalHook.KeyCombination = newHotKey;
+                    Trace.WriteLine("快捷键更新完成");
+                }
+                else
+                {
+                    InitializeHotKey();
+                }
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine($"更新快捷键时出错: {ex.Message}");
+                MessageBox.Show($"更新快捷键时出错: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+    }
+
+}
