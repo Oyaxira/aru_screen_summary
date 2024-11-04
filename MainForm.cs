@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Drawing.Imaging;
 using System.Windows.Forms;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Net.Http.Json;
 using System.Diagnostics;
 using System.Text.Json;
@@ -22,6 +23,21 @@ namespace ScreenshotGPT
         private Keys[] _currentHotkey = new Keys[] { Keys.ControlKey, Keys.Menu, Keys.P }; // 修改默认快捷键，使用通用的Control和Alt键
         private bool _disposed = false;
 
+        private Rectangle _selectionRect;
+        private bool _isDrawing;
+        private Button _applyButton;
+        private Button _cancelButton;
+
+        private class DoubleBufferedForm : Form
+        {
+            public DoubleBufferedForm()
+            {
+                SetStyle(ControlStyles.AllPaintingInWmPaint |
+                        ControlStyles.UserPaint |
+                        ControlStyles.DoubleBuffer, true);
+            }
+        }
+
         public MainForm()
         {
             try
@@ -29,7 +45,7 @@ namespace ScreenshotGPT
                 Trace.WriteLine("MainForm 构造函数开始");
                 InitializeComponent();
 
-                // 加载设置和历史记录
+                // 加载置和历史记录
                 _settings = AppSettings.Load();
                 TranslationHistory.Load();
                 Trace.WriteLine($"加载的设置 - API Key: {_settings.ApiKey?.Length > 0}, Endpoint: {_settings.Endpoint}");
@@ -109,36 +125,111 @@ namespace ScreenshotGPT
                 return;
             }
             _isCapturing = true;
-            Trace.WriteLine("创建遮罩窗口");
 
-            // 确保在UI线程上执行
-            if (InvokeRequired)
-            {
-                Invoke(new Action(() => CreateOverlay()));
-            }
-            else
-            {
-                CreateOverlay();
-            }
-        }
-
-        private void CreateOverlay()
-        {
-            Trace.WriteLine("开始创建遮罩窗口");
             try
             {
-                _overlay = new Form
+                // 创建一个全屏遮罩
+                Form darkOverlay = new Form
                 {
                     WindowState = FormWindowState.Maximized,
                     FormBorderStyle = FormBorderStyle.None,
-                    Opacity = 0.3,
                     BackColor = Color.Black,
+                    Opacity = 0.3,
                     ShowInTaskbar = false,
                     TopMost = true,
                     StartPosition = FormStartPosition.Manual,
                     Location = new Point(0, 0),
                     Size = Screen.PrimaryScreen.Bounds.Size
                 };
+                darkOverlay.Show();
+
+                // 等待一下确保遮罩显示
+                Application.DoEvents();
+
+                // 捕获整个屏幕
+                using (var fullScreenshot = new Bitmap(Screen.PrimaryScreen.Bounds.Width, Screen.PrimaryScreen.Bounds.Height))
+                {
+                    using (Graphics g = Graphics.FromImage(fullScreenshot))
+                    {
+                        g.CopyFromScreen(0, 0, 0, 0, fullScreenshot.Size);
+                    }
+
+                    // 关闭遮罩
+                    darkOverlay.Close();
+                    darkOverlay.Dispose();
+
+                    // 创建一个新的 Bitmap 副本
+                    var screenshotCopy = new Bitmap(fullScreenshot);
+                    CreateOverlay(screenshotCopy);
+                }
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine($"截图时出错: {ex.Message}\n{ex.StackTrace}");
+                _isCapturing = false;
+            }
+        }
+
+        private void CreateOverlay(Image screenshot)
+        {
+            Trace.WriteLine("开始创建遮罩窗口");
+            try
+            {
+                // 创建一个新的 Bitmap 来存储截图
+                Bitmap backgroundImage = new Bitmap(screenshot);
+
+                _overlay = new DoubleBufferedForm  // 使用自定义的双缓冲窗体
+                {
+                    WindowState = FormWindowState.Maximized,
+                    FormBorderStyle = FormBorderStyle.None,
+                    BackgroundImage = backgroundImage,
+                    BackgroundImageLayout = ImageLayout.None,
+                    ShowInTaskbar = false,
+                    TopMost = true,
+                    StartPosition = FormStartPosition.Manual,
+                    Location = new Point(0, 0),
+                    Size = Screen.PrimaryScreen.Bounds.Size
+                };
+
+                // 确保在窗口关闭时释放资源
+                _overlay.FormClosing += (s, e) =>
+                {
+                    if (_overlay.BackgroundImage != null)
+                    {
+                        _overlay.BackgroundImage.Dispose();
+                        _overlay.BackgroundImage = null;
+                    }
+                };
+
+                // 创建按钮但初始时不显示
+                _cancelButton = new Button
+                {
+                    Text = "取消",
+                    Size = new Size(60, 25),
+                    Visible = false,
+                    BackColor = Color.White,
+                    ForeColor = Color.Black,
+                    FlatStyle = FlatStyle.Standard,
+                    Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular),
+                    Cursor = Cursors.Hand
+                };
+                _cancelButton.Click += CancelButton_Click;
+
+                _applyButton = new Button
+                {
+                    Text = "应用",
+                    Size = new Size(60, 25),
+                    Visible = false,
+                    BackColor = Color.White,
+                    ForeColor = Color.Black,
+                    FlatStyle = FlatStyle.Standard,
+                    Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular),
+                    Cursor = Cursors.Hand
+                };
+                _applyButton.Click += ApplyButton_Click;
+
+                _overlay.Controls.Add(_cancelButton);
+                _overlay.Controls.Add(_applyButton);
 
                 _overlay.MouseDown += Overlay_MouseDown;
                 _overlay.MouseMove += Overlay_MouseMove;
@@ -148,15 +239,16 @@ namespace ScreenshotGPT
                 {
                     if (e.KeyCode == Keys.Escape)
                     {
-                        _isCapturing = false;
-                        _overlay.Close();
+                        CancelCapture();
                     }
                 };
 
+                // 设置鼠标样式
+                _overlay.Cursor = Cursors.Cross;
+
                 Trace.WriteLine("显示遮罩窗口");
                 _overlay.Show();
-                _overlay.Activate(); // 确保窗口在最前
-                Trace.WriteLine($"遮罩窗口已显示 - 位置: {_overlay.Location}, 大小: {_overlay.Size}");
+                _overlay.Activate();
             }
             catch (Exception ex)
             {
@@ -165,8 +257,33 @@ namespace ScreenshotGPT
             }
         }
 
-        private Rectangle _selectionRect;
-        private bool _isDrawing;
+        private void UpdateButtonsPosition()
+        {
+            if (_selectionRect.Width > 0 && _selectionRect.Height > 0)
+            {
+                // 交换按钮位置，应用按钮在右边
+                _cancelButton.Location = new Point(
+                    _selectionRect.Right - _applyButton.Width - _cancelButton.Width - 5,
+                    _selectionRect.Bottom + 5
+                );
+                _applyButton.Location = new Point(
+                    _selectionRect.Right - _applyButton.Width,
+                    _selectionRect.Bottom + 5
+                );
+
+                // 设置按钮样式
+                foreach (Button btn in new[] { _applyButton, _cancelButton })
+                {
+                    btn.Visible = true;
+                    btn.Parent = _overlay;
+                    btn.BringToFront();
+                }
+
+                // 设置按钮的层级
+                _overlay.Controls.SetChildIndex(_applyButton, 0);
+                _overlay.Controls.SetChildIndex(_cancelButton, 0);
+            }
+        }
 
         private void Overlay_MouseDown(object sender, MouseEventArgs e)
         {
@@ -187,17 +304,51 @@ namespace ScreenshotGPT
                     Math.Abs(e.X - _startPoint.X),
                     Math.Abs(e.Y - _startPoint.Y)
                 );
-                _overlay.Invalidate();
+                _overlay.Invalidate(true);  // 强制立即重绘
             }
         }
 
         private void Overlay_Paint(object sender, PaintEventArgs e)
         {
-            if (_isDrawing)
+            if (_selectionRect.Width > 0 && _selectionRect.Height > 0)
             {
-                using (Pen pen = new Pen(Color.Red, 2))
+                e.Graphics.CompositingMode = CompositingMode.SourceOver;
+                e.Graphics.CompositingQuality = CompositingQuality.HighSpeed;
+                e.Graphics.InterpolationMode = InterpolationMode.Low;
+                e.Graphics.SmoothingMode = SmoothingMode.HighSpeed;
+                e.Graphics.PixelOffsetMode = PixelOffsetMode.HighSpeed;
+
+                // 创建半透明遮罩
+                using (SolidBrush darkBrush = new SolidBrush(Color.FromArgb(120, 0, 0, 0)))
+                {
+                    // 绘制四个区域来创建遮罩效果
+                    Rectangle[] regions = {
+                        new Rectangle(0, 0, _overlay.Width, _selectionRect.Top),  // 上方
+                        new Rectangle(0, _selectionRect.Bottom, _overlay.Width, _overlay.Height - _selectionRect.Bottom),  // 下方
+                        new Rectangle(0, _selectionRect.Top, _selectionRect.Left, _selectionRect.Height),  // 左方
+                        new Rectangle(_selectionRect.Right, _selectionRect.Top, _overlay.Width - _selectionRect.Right, _selectionRect.Height)  // 右方
+                    };
+
+                    foreach (var region in regions)
+                    {
+                        e.Graphics.FillRectangle(darkBrush, region);
+                    }
+                }
+
+                // 绘制选区边框
+                using (Pen pen = new Pen(Color.DodgerBlue, 2))
                 {
                     e.Graphics.DrawRectangle(pen, _selectionRect);
+
+                    // 在四个角绘制小方块
+                    int squareSize = 6;
+                    using (SolidBrush squareBrush = new SolidBrush(Color.DodgerBlue))
+                    {
+                        e.Graphics.FillRectangle(squareBrush, _selectionRect.X - squareSize/2, _selectionRect.Y - squareSize/2, squareSize, squareSize);
+                        e.Graphics.FillRectangle(squareBrush, _selectionRect.Right - squareSize/2, _selectionRect.Y - squareSize/2, squareSize, squareSize);
+                        e.Graphics.FillRectangle(squareBrush, _selectionRect.X - squareSize/2, _selectionRect.Bottom - squareSize/2, squareSize, squareSize);
+                        e.Graphics.FillRectangle(squareBrush, _selectionRect.Right - squareSize/2, _selectionRect.Bottom - squareSize/2, squareSize, squareSize);
+                    }
                 }
             }
         }
@@ -206,45 +357,14 @@ namespace ScreenshotGPT
         {
             if (_selectionRect.Width > 0 && _selectionRect.Height > 0)
             {
-                _overlay.Hide();
-                await Task.Delay(100); // 等待overlay完全隐藏
-
-                try
-                {
-                    // 立即显示加载提示
-                    this.Invoke((MethodInvoker)delegate
-                    {
-                        ToastForm.ShowLoading(_selectionRect.Width);
-                    });
-
-                    using (Bitmap bitmap = new Bitmap(_selectionRect.Width, _selectionRect.Height))
-                    {
-                        using (Graphics g = Graphics.FromImage(bitmap))
-                        {
-                            g.CopyFromScreen(
-                                _selectionRect.Left,
-                                _selectionRect.Top,
-                                0,
-                                0,
-                                new Size(_selectionRect.Width, _selectionRect.Height)
-                            );
-                        }
-                        await SendToGPT(bitmap);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    this.Invoke((MethodInvoker)delegate
-                    {
-                        ToastForm.ShowMessage($"截图错误: {ex.Message}");
-                    });
-                }
+                _isDrawing = false;
+                UpdateButtonsPosition();
+                _overlay.Invalidate();
             }
-
-            _isCapturing = false;
-            _isDrawing = false;
-            _overlay.Close();
-            _overlay.Dispose();
+            else
+            {
+                CancelCapture();
+            }
         }
 
         private async Task SendToGPT(Bitmap image)
@@ -344,11 +464,11 @@ namespace ScreenshotGPT
                 }
                 catch (Exception ex)
                 {
-                    Trace.WriteLine($"加载自定义图标失败: {ex.Message}");
+                    Trace.WriteLine($"加载自定义图标失: {ex.Message}");
                     notifyIcon.Icon = SystemIcons.Application;  // 使用默认图标
                 }
 
-                // 创建右键菜单
+                // 右键菜单
                 var contextMenu = new ContextMenuStrip();
 
                 // 添加设置选项
@@ -448,6 +568,103 @@ namespace ScreenshotGPT
             {
                 Trace.WriteLine($"更新快捷键时出错: {ex.Message}");
                 MessageBox.Show($"更新快捷键时出错: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private async void ApplyButton_Click(object sender, EventArgs e)
+        {
+            if (_selectionRect.Width > 0 && _selectionRect.Height > 0)
+            {
+                _overlay.Hide();
+                await Task.Delay(100); // 等待overlay完全隐藏
+
+                try
+                {
+                    // 立即显示加载提示
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        ToastForm.ShowLoading(_selectionRect.Width);
+                    });
+
+                    using (Bitmap bitmap = new Bitmap(_selectionRect.Width, _selectionRect.Height))
+                    {
+                        using (Graphics g = Graphics.FromImage(bitmap))
+                        {
+                            g.CopyFromScreen(
+                                _selectionRect.Left,
+                                _selectionRect.Top,
+                                0,
+                                0,
+                                new Size(_selectionRect.Width, _selectionRect.Height)
+                            );
+                        }
+                        await SendToGPT(bitmap);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    this.Invoke((MethodInvoker)delegate
+                    {
+                        ToastForm.ShowMessage($"截图错误: {ex.Message}");
+                    });
+                }
+            }
+
+            CleanupCapture();
+        }
+
+        private void CancelButton_Click(object sender, EventArgs e)
+        {
+            CancelCapture();
+        }
+
+        private void CancelCapture()
+        {
+            // 清除选区
+            _selectionRect = Rectangle.Empty;
+            _isCapturing = false;
+            _isDrawing = false;
+
+            // 隐藏按钮
+            if (_applyButton != null) _applyButton.Visible = false;
+            if (_cancelButton != null) _cancelButton.Visible = false;
+
+            if (_overlay != null && !_overlay.IsDisposed)
+            {
+                // 确保清理背景图像
+                if (_overlay.BackgroundImage != null)
+                {
+                    _overlay.BackgroundImage.Dispose();
+                    _overlay.BackgroundImage = null;
+                }
+                _overlay.Close();
+                _overlay.Dispose();
+                _overlay = null;
+            }
+        }
+
+        private void CleanupCapture()
+        {
+            // 清除选区
+            _selectionRect = Rectangle.Empty;
+            _isCapturing = false;
+            _isDrawing = false;
+
+            // 隐藏按钮
+            if (_applyButton != null) _applyButton.Visible = false;
+            if (_cancelButton != null) _cancelButton.Visible = false;
+
+            if (_overlay != null && !_overlay.IsDisposed)
+            {
+                // 确保清理背景图像
+                if (_overlay.BackgroundImage != null)
+                {
+                    _overlay.BackgroundImage.Dispose();
+                    _overlay.BackgroundImage = null;
+                }
+                _overlay.Close();
+                _overlay.Dispose();
+                _overlay = null;
             }
         }
 
