@@ -15,6 +15,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # 获取完整的git历史，以便获取提交信息
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v3
@@ -33,6 +35,15 @@ jobs:
       run: echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
       shell: bash
 
+    - name: Get commit message
+      id: commit_message
+      run: |
+        $tag_name = "${{ github.ref_name }}"
+        $commit_message = git log -1 --format=%B $tag_name
+        $commit_message = $commit_message -replace "`n", "%0A"
+        echo "message=$commit_message" >> $env:GITHUB_OUTPUT
+      shell: pwsh
+
     - name: Zip Release Files
       run: |
         Compress-Archive -Path "bin\Release\net7.0-windows\win-x64\publish\*" -DestinationPath "AruScreenSummary_${{ steps.date.outputs.date }}_${{ github.ref_name }}.zip"
@@ -47,6 +58,9 @@ jobs:
           Release ${{ github.ref_name }}
 
           发布时间：${{ steps.date.outputs.date }}
+
+          ## 更新内容
+          ${{ steps.commit_message.outputs.message }}
 
           ## 运行环境要求
           - Windows 10/11

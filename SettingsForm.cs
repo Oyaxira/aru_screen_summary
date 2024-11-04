@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using Microsoft.Win32;
 
 namespace AruScreenSummary
 {
@@ -15,6 +16,8 @@ namespace AruScreenSummary
         private AppSettings _settings;
         private GlobalKeyboardHook _globalHook;
         private Keys[] _currentHotkey;
+        private const string StartupKey = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
+        private const string AppName = "AruScreenSummary";
 
         public SettingsForm(AppSettings settings, Keys[] currentHotkey, GlobalKeyboardHook globalHook)
         {
@@ -169,6 +172,29 @@ namespace AruScreenSummary
             saveButtonCell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             saveButtonCell.Controls.Add(saveButton, 1, 0);
             contentPanel.Controls.Add(saveButtonCell, 1, 5);
+
+            // 开机启动按钮
+            var startupButton = new Button
+            {
+                Width = 100,
+                Height = 30,
+                Margin = new Padding(0, 10, 0, 0)
+            };
+
+            // 根据当前状态设置按钮文本
+            UpdateStartupButtonText(startupButton);
+
+            // 添加到布局
+            contentPanel.Controls.Add(new Label { Text = "开机启动:", Anchor = AnchorStyles.Left }, 0, 6);
+            contentPanel.Controls.Add(startupButton, 1, 6);
+
+            // 绑定点击事件
+            startupButton.Click += (s, e) =>
+            {
+                bool currentState = IsStartupEnabled();
+                ToggleStartup(!currentState);
+                UpdateStartupButtonText(startupButton);
+            };
 
             // 绑定事件
             hotkeyBox.KeyDown += (s, e) =>
@@ -437,13 +463,57 @@ namespace AruScreenSummary
                 }
             };
 
-            // 将控件添加到主面板
+            // 将控件添��到主面板
             mainPanel.Controls.Add(listView, 0, 0);
             mainPanel.Controls.Add(pagePanel, 0, 1);
             mainPanel.Controls.Add(statusPanel, 0, 2);
 
             // 将主面板添加到标签页
             tab.Controls.Add(mainPanel);
+        }
+
+        private bool IsStartupEnabled()
+        {
+            using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(StartupKey))
+            {
+                if (key != null)
+                {
+                    string? value = key.GetValue(AppName) as string;
+                    return value != null && value.Equals(Application.ExecutablePath);
+                }
+                return false;
+            }
+        }
+
+        private void ToggleStartup(bool enable)
+        {
+            try
+            {
+                using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(StartupKey, true))
+                {
+                    if (key != null)
+                    {
+                        if (enable)
+                        {
+                            key.SetValue(AppName, Application.ExecutablePath);
+                        }
+                        else
+                        {
+                            key.DeleteValue(AppName, false);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"修改开机启动设置失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void UpdateStartupButtonText(Button button)
+        {
+            bool isEnabled = IsStartupEnabled();
+            button.Text = isEnabled ? "移除开机启动" : "添加开机启动";
         }
     }
 }
