@@ -5,6 +5,7 @@ WizardStyle=modern
 DefaultDirName={autopf}\Aru Screen Summary
 DefaultGroupName=Aru Screen Summary
 UninstallDisplayIcon={app}\bot.ico
+OutputDir=output
 OutputBaseFilename=AruScreenSummary_Setup
 Compression=lzma2
 SolidCompression=yes
