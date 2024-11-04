@@ -454,9 +454,17 @@ namespace AruScreenSummary
         {
             try
             {
+                // 压缩图片以减少 token 使用
+                using (var resizedImage = ResizeImage(image, 1400)) // 限制最大宽度为800像素
                 using (MemoryStream ms = new MemoryStream())
                 {
-                    image.Save(ms, ImageFormat.Png);
+                    // 使用较低质量的JPEG格式
+                    var jpegEncoder = ImageCodecInfo.GetImageEncoders()
+                        .First(c => c.FormatID == ImageFormat.Jpeg.Guid);
+                    var encoderParameters = new EncoderParameters(1);
+                    encoderParameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 90L);
+
+                    resizedImage.Save(ms, jpegEncoder, encoderParameters);
                     string base64Image = Convert.ToBase64String(ms.ToArray());
 
                     using (HttpClient client = new HttpClient())
@@ -470,7 +478,7 @@ namespace AruScreenSummary
                             new { role = "user", content = new object[]
                                 {
                                     new { type = "text", text = "解释" },
-                                    new { type = "image_url", image_url = new { url = $"data:image/png;base64,{base64Image}" } }
+                                    new { type = "image_url", image_url = new { url = $"data:image/jpeg;base64,{base64Image}", detail = "high" } }
                                 }
                             }
                         };
@@ -484,19 +492,16 @@ namespace AruScreenSummary
 
                         var jsonContent = JsonSerializer.Serialize(requestData);
                         var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
                         var response = await client.PostAsync(_settings.Endpoint, content);
 
                         if (response.IsSuccessStatusCode)
                         {
                             var result = await response.Content.ReadFromJsonAsync<GPTResponse>();
                             var responseContent = result.choices[0].message.content;
-
-                            // 添加记录时包含 token 使用信息
                             TranslationHistory.AddRecord(
                                 responseContent,
                                 _globalSelectionRect.Width,
-                                result.usage  // 传入 usage 信息
+                                result.usage
                             );
 
                             this.Invoke((MethodInvoker)delegate
@@ -519,9 +524,39 @@ namespace AruScreenSummary
             {
                 this.Invoke((MethodInvoker)delegate
                 {
-                    ToastForm.ShowMessage(ex.Message, 300);  // 错误消息使用默认宽度
+                    ToastForm.ShowMessage(ex.Message, 300);
                 });
             }
+        }
+
+        private Bitmap ResizeImage(Bitmap image, int maxLength)
+        {
+            // 如果原图尺寸已经在限制范围内,直接返回副本
+            if (image.Width <= maxLength && image.Height <= maxLength)
+                return new Bitmap(image);
+
+            // 计算宽高比
+            float ratio;
+            if (image.Width > image.Height)
+            {
+                // 如果宽度大于高度,以宽度为基准计算比例
+                ratio = (float)maxLength / image.Width;
+            }
+            else
+            {
+                // 如果高度大于宽度,以高度为基准计算比例
+                ratio = (float)maxLength / image.Height;
+            }
+            // 计算新的尺寸
+            int newWidth = (int)(image.Width * ratio);
+            int newHeight = (int)(image.Height * ratio);
+            var newImage = new Bitmap(newWidth, newHeight);
+            using (var graphics = Graphics.FromImage(newImage))
+            {
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.DrawImage(image, 0, 0, newWidth, newHeight);
+            }
+            return newImage;
         }
 
         private void InitializeNotifyIcon()
@@ -717,7 +752,7 @@ namespace AruScreenSummary
                 }
             }
 
-            CleanupCapture();
+            CancelCapture();
         }
 
         private void CancelButton_Click(object sender, EventArgs e)
@@ -754,37 +789,6 @@ namespace AruScreenSummary
                 _cancelButton.Dispose();
                 _cancelButton = null;
             }
-
-            if (_overlayForms != null)
-            {
-                foreach (var overlay in _overlayForms)
-                {
-                    if (!overlay.IsDisposed)
-                    {
-                        if (overlay.BackgroundImage != null)
-                        {
-                            overlay.BackgroundImage.Dispose();
-                        }
-                        overlay.Close();
-                        overlay.Dispose();
-                    }
-                }
-                _overlayForms.Clear();
-            }
-        }
-
-        private void CleanupCapture()
-        {
-            // 清除所有选区相关的状态
-            _selectionRect = Rectangle.Empty;
-            _globalSelectionRect = Rectangle.Empty;
-            _isCapturing = false;
-            _isDrawing = false;
-            _activeOverlay = null;
-            _globalStartPoint = Point.Empty;
-
-            if (_applyButton != null) _applyButton.Visible = false;
-            if (_cancelButton != null) _cancelButton.Visible = false;
 
             if (_overlayForms != null)
             {

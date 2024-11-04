@@ -23,7 +23,7 @@ public class TranslationRecord
 
 public class TranslationHistory
 {
-    private const int MAX_HISTORY = 100;  // 最多保存100条记录
+    private const int MAX_HISTORY = 400;  // 最多保存100条记录
     private static string HistoryPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "AruScreenSummary",
