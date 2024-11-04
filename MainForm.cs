@@ -333,34 +333,6 @@ namespace AruScreenSummary
             }
         }
 
-        private void UpdateButtonsPosition()
-        {
-            if (_selectionRect.Width > 0 && _selectionRect.Height > 0)
-            {
-                // 交换按钮位置，应用按钮在右边
-                _cancelButton.Location = new Point(
-                    _selectionRect.Right - _applyButton.Width - _cancelButton.Width - 5,
-                    _selectionRect.Bottom + 5
-                );
-                _applyButton.Location = new Point(
-                    _selectionRect.Right - _applyButton.Width,
-                    _selectionRect.Bottom + 5
-                );
-
-                // 设置按钮样式
-                foreach (Button btn in new[] { _applyButton, _cancelButton })
-                {
-                    btn.Visible = true;
-                    btn.Parent = _overlay;
-                    btn.BringToFront();
-                }
-
-                // 设置按钮的层级
-                _overlay.Controls.SetChildIndex(_applyButton, 0);
-                _overlay.Controls.SetChildIndex(_cancelButton, 0);
-            }
-        }
-
         private void Overlay_MouseDown(object sender, MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Left)
@@ -459,12 +431,22 @@ namespace AruScreenSummary
             }
         }
 
-        private async void Overlay_MouseUp(object sender, MouseEventArgs e)
+        private void Overlay_MouseUp(object sender, MouseEventArgs e)
         {
             if (_isDrawing && _globalSelectionRect.Width > 0 && _globalSelectionRect.Height > 0)
             {
                 _isDrawing = false;
-                CreateSelectionButtons();
+
+                // 如果按钮已经存在，只更新位置
+                if (_applyButton != null && _cancelButton != null)
+                {
+                    UpdateButtonsPosition();
+                }
+                else
+                {
+                    // 只在按钮不存在时创建
+                    CreateSelectionButtons();
+                }
             }
         }
 
@@ -723,8 +705,25 @@ namespace AruScreenSummary
             _activeOverlay = null;
             _globalStartPoint = Point.Empty;
 
-            if (_applyButton != null) _applyButton.Visible = false;
-            if (_cancelButton != null) _cancelButton.Visible = false;
+            // 正确清理按钮
+            if (_applyButton != null)
+            {
+                if (_applyButton.Parent != null)
+                {
+                    _applyButton.Parent.Controls.Remove(_applyButton);
+                }
+                _applyButton.Dispose();
+                _applyButton = null;
+            }
+            if (_cancelButton != null)
+            {
+                if (_cancelButton.Parent != null)
+                {
+                    _cancelButton.Parent.Controls.Remove(_cancelButton);
+                }
+                _cancelButton.Dispose();
+                _cancelButton = null;
+            }
 
             if (_overlayForms != null)
             {
@@ -777,6 +776,18 @@ namespace AruScreenSummary
 
         private void CreateSelectionButtons()
         {
+            // 如果按钮已存在，先清理掉
+            if (_applyButton != null)
+            {
+                _applyButton.Dispose();
+                _applyButton = null;
+            }
+            if (_cancelButton != null)
+            {
+                _cancelButton.Dispose();
+                _cancelButton = null;
+            }
+
             // 创建按钮
             _applyButton = new Button
             {
@@ -804,6 +815,11 @@ namespace AruScreenSummary
             };
             _cancelButton.Click += CancelButton_Click;
 
+            UpdateButtonsPosition();
+        }
+
+        private void UpdateButtonsPosition()
+        {
             // 找到包含选区右下角的窗口
             var targetOverlay = _overlayForms.FirstOrDefault(f =>
                 f.Bounds.Contains(new Point(
@@ -814,6 +830,16 @@ namespace AruScreenSummary
 
             if (targetOverlay != null)
             {
+                // 如果按钮已经在其他窗口上，先移除
+                if (_applyButton.Parent != null)
+                {
+                    _applyButton.Parent.Controls.Remove(_applyButton);
+                }
+                if (_cancelButton.Parent != null)
+                {
+                    _cancelButton.Parent.Controls.Remove(_cancelButton);
+                }
+
                 // 计算按钮在目标窗口上的位置
                 _cancelButton.Location = new Point(
                     _globalSelectionRect.Right - targetOverlay.Left - _applyButton.Width - _cancelButton.Width - 5,
