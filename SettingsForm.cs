@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 using System.Collections.Generic;
 using System.Diagnostics;
 
-namespace ScreenshotGPT
+namespace AruScreenSummary
 {
     public class SettingsForm : BaseSettingsForm
     {
@@ -246,18 +246,26 @@ namespace ScreenshotGPT
                 MultiSelect = false
             };
 
+            // 添加列，保持原有的列，添加新的 token 列
             listView.Columns.Add("时间", 150);
             listView.Columns.Add("内容", 400);
             listView.Columns.Add("宽度", 60);
+            listView.Columns.Add("Prompt", 70);    // 新增
+            listView.Columns.Add("Completion", 70); // 新增
+            listView.Columns.Add("Total", 70);      // 新增
 
             foreach (var record in TranslationHistory.Records)
             {
                 var item = new ListViewItem(record.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"));
                 item.SubItems.Add(record.Content);
                 item.SubItems.Add(record.Width.ToString());
+                item.SubItems.Add(record.PromptTokens.ToString());
+                item.SubItems.Add(record.CompletionTokens.ToString());
+                item.SubItems.Add(record.TotalTokens.ToString());
                 listView.Items.Add(item);
             }
 
+            // 恢复原有的双击事件处理
             listView.DoubleClick += (s, e) =>
             {
                 if (listView.SelectedItems.Count > 0)

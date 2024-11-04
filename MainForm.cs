@@ -10,7 +10,7 @@ using System.Text.Json;
 using System.Net.Http;
 using System.Text;
 
-namespace ScreenshotGPT
+namespace AruScreenSummary
 {
     public partial class MainForm : Form
     {
@@ -34,6 +34,19 @@ namespace ScreenshotGPT
         private Point _globalStartPoint;
         private Rectangle _globalSelectionRect;
 
+        [DllImport("user32.dll")]
+        private static extern bool SetProcessDPIAware();
+
+        [DllImport("shcore.dll")]
+        private static extern int SetProcessDpiAwareness(PROCESS_DPI_AWARENESS awareness);
+
+        private enum PROCESS_DPI_AWARENESS
+        {
+            Process_DPI_Unaware = 0,
+            Process_System_DPI_Aware = 1,
+            Process_Per_Monitor_DPI_Aware = 2
+        }
+
         private class DoubleBufferedForm : Form
         {
             public DoubleBufferedForm()
@@ -48,23 +61,29 @@ namespace ScreenshotGPT
         {
             try
             {
-                Trace.WriteLine("MainForm 构造函数开始");
+                // 使用更现代的DPI感知方式
+                if (Environment.OSVersion.Version.Major >= 6)
+                {
+                    SetProcessDpiAwareness(PROCESS_DPI_AWARENESS.Process_Per_Monitor_DPI_Aware);
+                }
+                else
+                {
+                    SetProcessDPIAware();
+                }
+
                 InitializeComponent();
 
-                // 加载置和历史记录
-                _settings = AppSettings.Load();
+                // 加载设置和历史记录
+                _settings = AppSettings.Load() ?? new AppSettings();  // 确保不为 null
                 TranslationHistory.Load();
-                Trace.WriteLine($"加载的设置 - API Key: {_settings.ApiKey?.Length > 0}, Endpoint: {_settings.Endpoint}");
 
                 // 使用保存的快捷键或默认快捷键
                 _currentHotkey = _settings.HotKeys?.Length > 0 ? _settings.HotKeys : new Keys[] { Keys.ControlKey, Keys.Menu, Keys.P };
-                Trace.WriteLine($"使用快捷键: {string.Join(" + ", _currentHotkey)}");
 
                 // 先初始化托盘图标，确保在隐藏窗口前托盘图标已经显示
                 InitializeNotifyIcon();
                 InitializeHotKey();
 
-                Trace.WriteLine("初始化完成");
 
                 // 确保托盘图标可见后再隐藏主窗体
                 this.ShowInTaskbar = false;
@@ -73,7 +92,6 @@ namespace ScreenshotGPT
             }
             catch (Exception ex)
             {
-                Trace.WriteLine($"MainForm 初始化错误: {ex}");
                 MessageBox.Show($"初始化错误: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -84,23 +102,18 @@ namespace ScreenshotGPT
             {
                 if (_globalHook != null)
                 {
-                    Trace.WriteLine("正在释放旧的钩子");
                     _globalHook.Dispose();
                     _globalHook = null;
                 }
 
-                Trace.WriteLine("开始初始化全局钩子");
                 _globalHook = new GlobalKeyboardHook();
                 _globalHook.KeyCombination = _currentHotkey;
                 _globalHook.KeyPressed += () =>
                 {
-                    Trace.WriteLine("快捷键事件被触发");
                     if (!_isCapturing)
                     {
-                        Trace.WriteLine("准备开始截图");
                         if (InvokeRequired)
                         {
-                            Trace.WriteLine("在UI线程上执行截图");
                             Invoke(new Action(StartCapture));
                         }
                         else
@@ -110,24 +123,19 @@ namespace ScreenshotGPT
                     }
                     else
                     {
-                        Trace.WriteLine("已经在截图中，忽略本次触发");
                     }
                 };
-                Trace.WriteLine($"已设置快捷键: {string.Join(" + ", _currentHotkey)}");
             }
             catch (Exception ex)
             {
-                Trace.WriteLine($"初始化快捷键时出错: {ex.Message}\n{ex.StackTrace}");
                 MessageBox.Show($"初始化快捷键时出错: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
         public void StartCapture()
         {
-            Trace.WriteLine("开始截图");
             if (_isCapturing)
             {
-                Trace.WriteLine("已经在截图中，忽略本次触发");
                 return;
             }
             _isCapturing = true;
@@ -154,7 +162,6 @@ namespace ScreenshotGPT
                     };
                     _overlayForms.Add(darkOverlay);
                     darkOverlay.Show();
-                    Trace.WriteLine($"创建遮罩窗口: {screen.DeviceName}, 位置: {darkOverlay.Location}, 大小: {darkOverlay.Size}");
                 }
 
                 // 等待遮罩显示
@@ -209,13 +216,12 @@ namespace ScreenshotGPT
                     }
                     _overlayForms.Clear();
 
-                    // 创建选择窗口
+                    // 建选择窗口
                     CreateScreenOverlays(new Bitmap(compositeBitmap));
                 }
             }
             catch (Exception ex)
             {
-                Trace.WriteLine($"截图时出错: {ex.Message}\n{ex.StackTrace}");
                 _isCapturing = false;
 
                 // 确保清理所有窗口
@@ -245,7 +251,6 @@ namespace ScreenshotGPT
             int bottom = Screen.AllScreens.Max(s => s.Bounds.Bottom);
 
             Rectangle totalBounds = new Rectangle(left, top, right - left, bottom - top);
-            Trace.WriteLine($"计算的总边界: X={totalBounds.X}, Y={totalBounds.Y}, Width={totalBounds.Width}, Height={totalBounds.Height}");
             return totalBounds;
         }
 
@@ -257,15 +262,33 @@ namespace ScreenshotGPT
 
             foreach (Screen screen in screens)
             {
+                // 获取真实的屏幕分辨率
+                var screenBounds = screen.Bounds;
+
                 var screenOverlay = new DoubleBufferedForm
                 {
                     StartPosition = FormStartPosition.Manual,
                     FormBorderStyle = FormBorderStyle.None,
                     ShowInTaskbar = false,
                     TopMost = true,
-                    Location = screen.Bounds.Location,
-                    Size = screen.Bounds.Size
+                    Location = screenBounds.Location,
+                    Size = screenBounds.Size,
+                    AutoScaleMode = AutoScaleMode.None
                 };
+
+                // 确保窗口不会被DPI缩放影响
+                screenOverlay.HandleCreated += (s, e) =>
+                {
+                    var form = (Form)s;
+                    var currentScreen = Screen.FromHandle(form.Handle);
+                    if (currentScreen.Bounds != form.Bounds)
+                    {
+                        form.Size = currentScreen.Bounds.Size;
+                        form.Location = currentScreen.Bounds.Location;
+                    }
+                };
+
+                // 为了确保正确的大小，添加日志
 
                 // 为每个屏幕创建精确的背景图
                 screenOverlay.BackgroundImage = new Bitmap(screen.Bounds.Width, screen.Bounds.Height);
@@ -401,7 +424,7 @@ namespace ScreenshotGPT
                     _globalSelectionRect.Height
                 );
 
-                // 创建半透明遮罩
+                // 创建透明遮罩
                 using (SolidBrush darkBrush = new SolidBrush(Color.FromArgb(120, 0, 0, 0)))
                 {
                     // 绘制四个区域来创建遮罩效果
@@ -458,28 +481,22 @@ namespace ScreenshotGPT
                     {
                         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {_settings.ApiKey}");
 
+                        // 明确定义消息类型
+                        var messages = new object[]
+                        {
+                            new { role = "system", content = "Parse and summarize the image content,Reply in the user's language." },
+                            new { role = "user", content = new object[]
+                                {
+                                    new { type = "text", text = "解释" },
+                                    new { type = "image_url", image_url = new { url = $"data:image/png;base64,{base64Image}" } }
+                                }
+                            }
+                        };
+
                         var requestData = new
                         {
                             model = _settings.Model,
-                            messages = new[]
-                            {
-                                new
-                                {
-                                    role = "user",
-                                    content = new object[]
-                                    {
-                                        new { type = "text", text = "请描述并解析这张图片的内容" },
-                                        new
-                                        {
-                                            type = "image_url",
-                                            image_url = new
-                                            {
-                                                url = $"data:image/png;base64,{base64Image}"
-                                            }
-                                        }
-                                    }
-                                }
-                            },
+                            messages = messages,
                             max_tokens = _settings.MaxTokens
                         };
 
@@ -493,12 +510,16 @@ namespace ScreenshotGPT
                             var result = await response.Content.ReadFromJsonAsync<GPTResponse>();
                             var responseContent = result.choices[0].message.content;
 
-                            // 添加到历史记录时包含宽度
-                            TranslationHistory.AddRecord(responseContent, _selectionRect.Width);
+                            // 添加记录时包含 token 使用信息
+                            TranslationHistory.AddRecord(
+                                responseContent,
+                                _globalSelectionRect.Width,
+                                result.usage  // 传入 usage 信息
+                            );
 
                             this.Invoke((MethodInvoker)delegate
                             {
-                                ToastForm.ShowMessage(responseContent, _selectionRect.Width);
+                                ToastForm.ShowMessage(responseContent, _globalSelectionRect.Width);
                             });
                         }
                         else
@@ -542,7 +563,6 @@ namespace ScreenshotGPT
                 }
                 catch (Exception ex)
                 {
-                    Trace.WriteLine($"加载自定义图标失: {ex.Message}");
                     notifyIcon.Icon = SystemIcons.Application;  // 使用默认图标
                 }
 
@@ -563,11 +583,9 @@ namespace ScreenshotGPT
                 // 添加双击事件
                 notifyIcon.DoubleClick += (s, e) => ShowSettings();
 
-                Trace.WriteLine("托盘图标初始化完成");
             }
             catch (Exception ex)
             {
-                Trace.WriteLine($"初始化托盘图标失败: {ex.Message}");
                 throw; // 重新抛出异常，因为没有托盘图标程序就无法正常使用
             }
         }
@@ -629,13 +647,11 @@ namespace ScreenshotGPT
             try
             {
                 _currentHotkey = newHotKey;
-                Trace.WriteLine($"更新快捷键: {string.Join(" + ", newHotKey)}");
 
                 if (_globalHook != null)
                 {
                     // 直接更新组合键，内部会重新注册钩子
                     _globalHook.KeyCombination = newHotKey;
-                    Trace.WriteLine("快捷键更新完成");
                 }
                 else
                 {
@@ -644,7 +660,6 @@ namespace ScreenshotGPT
             }
             catch (Exception ex)
             {
-                Trace.WriteLine($"更新快捷键时出错: {ex.Message}");
                 MessageBox.Show($"更新快捷键时出错: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -765,7 +780,7 @@ namespace ScreenshotGPT
             // 创建按钮
             _applyButton = new Button
             {
-                Text = "应用",
+                Text = "解析",
                 Size = new Size(60, 25),
                 Visible = true,
                 BackColor = Color.White,

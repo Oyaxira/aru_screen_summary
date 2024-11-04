@@ -6,7 +6,7 @@ using System.Windows.Forms;
 using System.ComponentModel;
 using System.Linq;
 
-namespace ScreenshotGPT
+namespace AruScreenSummary
 {
     public class GlobalKeyboardHook : IDisposable
     {
@@ -75,17 +75,14 @@ namespace ScreenshotGPT
 
                 if (keyDown)
                 {
-                    Trace.WriteLine($"按下按键: {key}");
                     if (!_pressedKeys.Contains(key))
                     {
                         _pressedKeys.Add(key);
-                        Trace.WriteLine($"当前按下的按键: {string.Join(" + ", _pressedKeys)}");
                         CheckHotkey();
                     }
                 }
                 else if (keyUp)
                 {
-                    Trace.WriteLine($"释放按键: {key}");
                     _pressedKeys.Remove(key);
                 }
             }
@@ -111,13 +108,8 @@ namespace ScreenshotGPT
 
             bool onlyHotkeyKeysPressed = _pressedKeys.Count == _keyCombination.Length;
 
-            Trace.WriteLine($"检查快捷键 - 所有按键已按下: {allKeysPressed}, 只按下了快捷键按键: {onlyHotkeyKeysPressed}");
-            Trace.WriteLine($"期望的按键组合: {string.Join(" + ", _keyCombination)}");
-            Trace.WriteLine($"当前按下的按键: {string.Join(" + ", _pressedKeys)}");
-
             if (allKeysPressed && onlyHotkeyKeysPressed)
             {
-                Trace.WriteLine("触发快捷键事件");
                 KeyPressed?.Invoke();
             }
         }

@@ -1,90 +1,84 @@
-using System;
-using System.Collections.Generic;
 using System.Text.Json;
-using System.IO;
 using System.Diagnostics;
 
-namespace ScreenshotGPT
+public class TranslationRecord
 {
-    public class TranslationRecord
+    public DateTime Timestamp { get; set; }
+    public string Content { get; set; }
+    public int Width { get; set; }
+    public Usage TokenUsage { get; set; }
+
+    public int PromptTokens => TokenUsage?.prompt_tokens ?? 0;
+    public int CompletionTokens => TokenUsage?.completion_tokens ?? 0;
+    public int TotalTokens => TokenUsage?.total_tokens ?? 0;
+
+    public TranslationRecord(string content, int width, Usage tokenUsage)
     {
-        public DateTime Timestamp { get; set; }
-        public string Content { get; set; }
-        public int Width { get; set; }
+        Content = content;
+        Timestamp = DateTime.Now;
+        Width = width;
+        TokenUsage = tokenUsage;
+    }
+}
+
+public class TranslationHistory
+{
+    private const int MAX_HISTORY = 100;  // 最多保存100条记录
+    private static string HistoryPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "AruScreenSummary",
+        "history.json"
+    );
+
+    public static List<TranslationRecord> Records { get; private set; } = new List<TranslationRecord>();
+
+    public static void Load()
+    {
+        try
+        {
+            if (File.Exists(HistoryPath))
+            {
+                string json = File.ReadAllText(HistoryPath);
+                var records = JsonSerializer.Deserialize<List<TranslationRecord>>(json);
+                if (records != null)
+                {
+                    Records = records;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"加载历史记录失败: {ex.Message}");
+        }
     }
 
-    public static class TranslationHistory
+    public static void Save()
     {
-        private static List<TranslationRecord> _records = new List<TranslationRecord>();
-        private static readonly string HistoryPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "AruScreenSummary",
-            "history.json"
-        );
-
-        public static IReadOnlyList<TranslationRecord> Records => _records.AsReadOnly();
-
-        public static void AddRecord(string content, int width)
+        try
         {
-            var record = new TranslationRecord
+            string directoryPath = Path.GetDirectoryName(HistoryPath);
+            if (!Directory.Exists(directoryPath))
             {
-                Timestamp = DateTime.Now,
-                Content = content,
-                Width = width
-            };
-
-            _records.Insert(0, record); // 在开头插入，保持最新记录在前
-
-            // 限制历史记录数量
-            if (_records.Count > 100)
-            {
-                _records.RemoveRange(100, _records.Count - 100);
+                Directory.CreateDirectory(directoryPath);
             }
 
-            Save();
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            string json = JsonSerializer.Serialize(Records, options);
+            File.WriteAllText(HistoryPath, json);
         }
-
-        public static void Load()
+        catch (Exception ex)
         {
-            try
-            {
-                if (File.Exists(HistoryPath))
-                {
-                    string json = File.ReadAllText(HistoryPath);
-                    var records = JsonSerializer.Deserialize<List<TranslationRecord>>(json);
-                    if (records != null)
-                    {
-                        _records = records;
-                        Trace.WriteLine($"加载了 {records.Count} 条历史记录");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Trace.WriteLine($"加载历史记录失败: {ex.Message}");
-                _records = new List<TranslationRecord>();
-            }
+            Debug.WriteLine($"保存历史记录失败: {ex.Message}");
         }
+    }
 
-        private static void Save()
+    public static void AddRecord(string content, int width, Usage usage)
+    {
+        Records.Insert(0, new TranslationRecord(content, width, usage));
+        if (Records.Count > MAX_HISTORY)
         {
-            try
-            {
-                string directoryPath = Path.GetDirectoryName(HistoryPath);
-                if (!Directory.Exists(directoryPath))
-                {
-                    Directory.CreateDirectory(directoryPath);
-                }
-
-                var options = new JsonSerializerOptions { WriteIndented = true };
-                string json = JsonSerializer.Serialize(_records, options);
-                File.WriteAllText(HistoryPath, json);
-                Trace.WriteLine("历史记录保存成功");
-            }
-            catch (Exception ex)
-            {
-                Trace.WriteLine($"保存历史记录失败: {ex.Message}");
-            }
+            Records.RemoveRange(MAX_HISTORY, Records.Count - MAX_HISTORY);
         }
+        Save();
     }
 }

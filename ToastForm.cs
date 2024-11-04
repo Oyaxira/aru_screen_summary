@@ -22,19 +22,20 @@ public class ToastForm : Form
     private bool _isLoading = false;
     private System.Windows.Forms.Timer _loadingTimer;
     private int _loadingDots = 0;
-    private const string LOADING_TEXT = "正在分析中";
+    private const string LOADING_TEXT_BASE = "正在分析中";
+    private const int MAX_DOTS = 3;
     private WebView2 _webView;
 
     public static void ShowLoading(int width = 400)
     {
         if (_instance == null || _instance.IsDisposed)
         {
-            _instance = new ToastForm(LOADING_TEXT, width, true);
+            _instance = new ToastForm(LOADING_TEXT_BASE, width, true);
             _instance.Show();
         }
         else
         {
-            _instance.UpdateMessage(LOADING_TEXT, width, true);
+            _instance.UpdateMessage(LOADING_TEXT_BASE, width, true);
         }
     }
 
@@ -66,7 +67,7 @@ public class ToastForm : Form
             _loadingTimer.Interval = 500; // 每500ms更新一次
             _loadingTimer.Tick += (s, e) =>
             {
-                _loadingDots = (_loadingDots + 1) % 4;
+                _loadingDots = (_loadingDots + 1) % (MAX_DOTS + 1);
                 this.Invalidate();
             };
             _loadingTimer.Start();
@@ -292,7 +293,7 @@ public class ToastForm : Form
             _loadingTimer.Interval = 500;
             _loadingTimer.Tick += (s, e) =>
             {
-                _loadingDots = (_loadingDots + 1) % 4;
+                _loadingDots = (_loadingDots + 1) % (MAX_DOTS + 1);
                 this.Invalidate();
             };
             _loadingTimer.Start();
@@ -347,15 +348,18 @@ public class ToastForm : Form
         );
 
         // 更新 WebView 内容
-        string displayText = _message;
-        if (_isLoading)
-        {
-            displayText = $"{_message}{new string('.', _loadingDots)}";
-        }
-
         if (_webView != null)
         {
-            // 使用相同的 HTML 模板
+            string displayText;
+            if (_isLoading)
+            {
+                displayText = $"{LOADING_TEXT_BASE}{new string('.', _loadingDots)}";  // 直接拼接点号
+            }
+            else
+            {
+                displayText = _message;
+            }
+
             string htmlStart = @"
                 <!DOCTYPE html>
                 <html>

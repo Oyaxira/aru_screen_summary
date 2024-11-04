@@ -1,4 +1,4 @@
-namespace ScreenshotGPT
+namespace AruScreenSummary
 {
     partial class MainForm
     {
@@ -37,7 +37,7 @@ namespace ScreenshotGPT
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(800, 450);
             this.Name = "MainForm";
-            this.Text = "ScreenshotGPT";
+            this.Text = "AruScreenSummary";
             this.ResumeLayout(false);
         }
 
