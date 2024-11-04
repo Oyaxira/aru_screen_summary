@@ -4,6 +4,7 @@ using System.Windows.Forms;
 using System.Runtime.InteropServices;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 
 namespace AruScreenSummary
 {
@@ -26,6 +27,7 @@ namespace AruScreenSummary
 
             this.Text = "设置";
             this.Size = new Size(600, 500);
+            this.ShowIcon = true;
 
             // 设置窗口图标
             try
@@ -34,6 +36,7 @@ namespace AruScreenSummary
                 {
                     IntPtr hIcon = bitmap.GetHicon();
                     this.Icon = Icon.FromHandle(hIcon);
+                    this.ShowInTaskbar = true;
                 }
             }
             catch (Exception ex)
@@ -237,6 +240,17 @@ namespace AruScreenSummary
 
         private void InitializeHistoryTab(TabPage tab)
         {
+            // 创建一个垂直布局的面板
+            var mainPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                RowCount = 2,
+                ColumnCount = 1,
+                Padding = new Padding(5),
+            };
+            mainPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F)); // ListView占用所有剩余空间
+            mainPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F)); // 状态栏固定高度
+
             var listView = new ListView
             {
                 Dock = DockStyle.Fill,
@@ -246,14 +260,15 @@ namespace AruScreenSummary
                 MultiSelect = false
             };
 
-            // 添加列，保持原有的列，添加新的 token 列
+            // 添加列
             listView.Columns.Add("时间", 150);
             listView.Columns.Add("内容", 400);
             listView.Columns.Add("宽度", 60);
-            listView.Columns.Add("Prompt", 70);    // 新增
-            listView.Columns.Add("Completion", 70); // 新增
-            listView.Columns.Add("Total", 70);      // 新增
+            listView.Columns.Add("Prompt", 70);
+            listView.Columns.Add("Completion", 70);
+            listView.Columns.Add("Total", 70);
 
+            // 添加记录
             foreach (var record in TranslationHistory.Records)
             {
                 var item = new ListViewItem(record.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"));
@@ -265,7 +280,57 @@ namespace AruScreenSummary
                 listView.Items.Add(item);
             }
 
-            // 恢复原有的双击事件处理
+            // 计算总token使用量
+            int totalPromptTokens = TranslationHistory.Records.Sum(r => r.PromptTokens);
+            int totalCompletionTokens = TranslationHistory.Records.Sum(r => r.CompletionTokens);
+            int totalTokens = TranslationHistory.Records.Sum(r => r.TotalTokens);
+
+            // 创建状态栏面板
+            var statusPanel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 3,
+                RowCount = 1,
+                BackColor = Color.FromArgb(240, 240, 240),
+                Margin = new Padding(0),
+                Padding = new Padding(5)
+            };
+
+            // 添加三个标签显示统计信息
+            var promptLabel = new Label
+            {
+                Text = $"总输入Token: {totalPromptTokens:N0}",
+                TextAlign = ContentAlignment.MiddleLeft,
+                Dock = DockStyle.Fill,
+                AutoSize = false
+            };
+
+            var completionLabel = new Label
+            {
+                Text = $"总输出Token: {totalCompletionTokens:N0}",
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock = DockStyle.Fill,
+                AutoSize = false
+            };
+
+            var totalLabel = new Label
+            {
+                Text = $"总Token用量: {totalTokens:N0}",
+                TextAlign = ContentAlignment.MiddleRight,
+                Dock = DockStyle.Fill,
+                AutoSize = false
+            };
+
+            statusPanel.Controls.Add(promptLabel, 0, 0);
+            statusPanel.Controls.Add(completionLabel, 1, 0);
+            statusPanel.Controls.Add(totalLabel, 2, 0);
+
+            // 设置列宽度比例
+            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
+            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
+            statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
+
+            // 恢复双击事件处理
             listView.DoubleClick += (s, e) =>
             {
                 if (listView.SelectedItems.Count > 0)
@@ -276,7 +341,12 @@ namespace AruScreenSummary
                 }
             };
 
-            tab.Controls.Add(listView);
+            // 将控件添加到主面板
+            mainPanel.Controls.Add(listView, 0, 0);
+            mainPanel.Controls.Add(statusPanel, 0, 1);
+
+            // 将主面板添加到标签页
+            tab.Controls.Add(mainPanel);
         }
     }
 }
