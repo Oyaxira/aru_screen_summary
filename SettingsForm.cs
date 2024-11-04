@@ -150,7 +150,7 @@ namespace AruScreenSummary
             {
                 Width = 330,
                 Minimum = 100,
-                Maximum = 4000,
+                Maximum = 4096,
                 Value = _settings.MaxTokens
             };
             contentPanel.Controls.Add(tokensBox, 1, 4);

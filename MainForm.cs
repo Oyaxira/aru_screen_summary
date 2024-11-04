@@ -537,10 +537,18 @@ namespace AruScreenSummary
                 // 尝试加载自定义图标
                 try
                 {
-                    using (var bitmap = new Bitmap("bot.png"))
+                    // 优先使用 ICO 文件
+                    if (File.Exists("bot.ico"))
                     {
-                        IntPtr hIcon = bitmap.GetHicon();
-                        notifyIcon.Icon = Icon.FromHandle(hIcon);
+                        notifyIcon.Icon = new Icon("bot.ico");
+                    }
+                    else
+                    {
+                        using (var bitmap = new Bitmap("bot.png"))
+                        {
+                            IntPtr hIcon = bitmap.GetHicon();
+                            notifyIcon.Icon = Icon.FromHandle(hIcon);
+                        }
                     }
                 }
                 catch (Exception ex)

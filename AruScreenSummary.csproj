@@ -8,6 +8,18 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <StartupObject>AruScreenSummary.Program</StartupObject>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <DebugType>none</DebugType>
+    <ApplicationIcon>bot.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Authors>Oyaxira</Authors>
+    <Company>Oyaxira</Company>
+    <Product>Aru Screen Summary</Product>
+    <Description>A screen capture and AI analysis tool</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,7 +29,19 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="bot.ico">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="bot.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="demo1.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
