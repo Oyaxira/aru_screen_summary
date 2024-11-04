@@ -128,30 +128,32 @@ namespace ScreenshotGPT
 
             try
             {
+                // 获取所有屏幕的总边界
+                Rectangle virtualScreen = SystemInformation.VirtualScreen;
+
                 // 创建一个全屏遮罩
                 Form darkOverlay = new Form
                 {
-                    WindowState = FormWindowState.Maximized,
+                    StartPosition = FormStartPosition.Manual,
                     FormBorderStyle = FormBorderStyle.None,
                     BackColor = Color.Black,
                     Opacity = 0.3,
                     ShowInTaskbar = false,
                     TopMost = true,
-                    StartPosition = FormStartPosition.Manual,
-                    Location = new Point(0, 0),
-                    Size = Screen.PrimaryScreen.Bounds.Size
+                    Location = new Point(virtualScreen.X, virtualScreen.Y),
+                    Size = new Size(virtualScreen.Width, virtualScreen.Height)
                 };
                 darkOverlay.Show();
 
                 // 等待一下确保遮罩显示
                 Application.DoEvents();
 
-                // 捕获整个屏幕
-                using (var fullScreenshot = new Bitmap(Screen.PrimaryScreen.Bounds.Width, Screen.PrimaryScreen.Bounds.Height))
+                // 捕获整个虚拟屏幕
+                using (var fullScreenshot = new Bitmap(virtualScreen.Width, virtualScreen.Height))
                 {
                     using (Graphics g = Graphics.FromImage(fullScreenshot))
                     {
-                        g.CopyFromScreen(0, 0, 0, 0, fullScreenshot.Size);
+                        g.CopyFromScreen(virtualScreen.X, virtualScreen.Y, 0, 0, virtualScreen.Size);
                     }
 
                     // 关闭遮罩
@@ -175,20 +177,22 @@ namespace ScreenshotGPT
             Trace.WriteLine("开始创建遮罩窗口");
             try
             {
+                // 获取所有屏幕的总边界
+                Rectangle virtualScreen = SystemInformation.VirtualScreen;
+
                 // 创建一个新的 Bitmap 来存储截图
                 Bitmap backgroundImage = new Bitmap(screenshot);
 
-                _overlay = new DoubleBufferedForm  // 使用自定义的双缓冲窗体
+                _overlay = new DoubleBufferedForm
                 {
-                    WindowState = FormWindowState.Maximized,
+                    StartPosition = FormStartPosition.Manual,
                     FormBorderStyle = FormBorderStyle.None,
                     BackgroundImage = backgroundImage,
                     BackgroundImageLayout = ImageLayout.None,
                     ShowInTaskbar = false,
                     TopMost = true,
-                    StartPosition = FormStartPosition.Manual,
-                    Location = new Point(0, 0),
-                    Size = Screen.PrimaryScreen.Bounds.Size
+                    Location = new Point(virtualScreen.X, virtualScreen.Y),
+                    Size = new Size(virtualScreen.Width, virtualScreen.Height)
                 };
 
                 // 确保在窗口关闭时释放资源
@@ -586,13 +590,17 @@ namespace ScreenshotGPT
                         ToastForm.ShowLoading(_selectionRect.Width);
                     });
 
+                    // 获取所有屏幕的总边界
+                    Rectangle virtualScreen = SystemInformation.VirtualScreen;
+
                     using (Bitmap bitmap = new Bitmap(_selectionRect.Width, _selectionRect.Height))
                     {
                         using (Graphics g = Graphics.FromImage(bitmap))
                         {
+                            // 使用相对于虚拟屏幕的坐标
                             g.CopyFromScreen(
-                                _selectionRect.Left,
-                                _selectionRect.Top,
+                                virtualScreen.X + _selectionRect.Left,
+                                virtualScreen.Y + _selectionRect.Top,
                                 0,
                                 0,
                                 new Size(_selectionRect.Width, _selectionRect.Height)
